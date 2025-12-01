@@ -1,101 +1,78 @@
 """
-DES (Data Encryption Standard) Implementation and Benchmark
-Cody Kostlecky
+RSA (Rivest–Shamir–Adleman) Implementation and Benchmark
+Kirsten B.
 
-DES is a symmetric encryption algorithm developed in the late 1970s.
-- 64-bit plaintext input/output
-- 64-bit key (56-bit effective, 8 parity bits)
-- 16 rounds of encryption
-- Block cipher with various modes
+RSA is an asymmetric (public-key) encryption algorithm introduced in 1977.
+- Public / private key pair
+- Typical key sizes: 1024, 2048, 3072, 4096 bits
+- Based on the hardness of factoring large integers
+- Used mainly for key exchange, digital signatures, and small messages
 """
 
-from Crypto.Cipher import DES
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Random import get_random_bytes
-from Crypto.Util.Padding import pad, unpad
 import time
 import matplotlib.pyplot as plt
 import numpy as np
 
 
-class DESAnalysis:
+class RSAAnalysis:
     def __init__(self):
-        """Initialize DES key and test parameters"""
-        # DES uses a 64-bit (8 byte) key
-        # Every 8th bit is a parity bit, giving us 56 effective bits
-        self.des_key = get_random_bytes(8)
+        """Initialize RSA key pair and test parameters"""
+        # Generate a 2048-bit RSA key pair (common modern size)
+        self.key = RSA.generate(2048)
+        self.public_key = self.key.public_key()
+        self.private_key = self.key
 
-        # Test with various data sizes (in bytes)
-        self.test_sizes = [8, 64, 256, 1024, 4096, 16384, 65536]
+        # With 2048-bit RSA + OAEP, max message size is limited
+        # For 2048-bit key + SHA-1 OAEP, max is 214 bytes; we'll stay under that.
+        self.test_sizes = [16, 32, 64, 128, 190]
 
         print("=" * 60)
-        print("DES ENCRYPTION ALGORITHM ANALYSIS")
+        print("RSA ENCRYPTION ALGORITHM ANALYSIS")
         print("=" * 60)
-        print(f"DES Key (hex): {self.des_key.hex()}")
-        print(f"Key Size: 64 bits (56 effective bits after parity)")
-        print(f"Block Size: 64 bits (8 bytes)")
+        print(f"Modulus (n) size: {self.key.size_in_bits()} bits")
+        print(f"Public exponent (e): {self.key.e}")
+        print("Key Type: Asymmetric (public/private key pair)")
+        print("Cipher: RSA with PKCS#1 OAEP padding")
         print("=" * 60 + "\n")
 
-    def des_encrypt(self, plaintext):
+    def rsa_encrypt(self, plaintext: bytes) -> bytes:
         """
-        DES Encryption Process:
-        1. Initial permutation of the plaintext
-        2. 16 rounds of:
-           - Split key in half
-           - Circular rotation (1 or 2 bits depending on round)
-           - Key compression (56 bits → 48 bits)
-           - Expansion of plaintext half (32 bits → 48 bits)
-           - XOR with compressed key
-           - Substitution function (48 bits → 32 bits)
-           - Permutation
-        3. Final permutation
+        RSA Encryption Process (conceptually):
+        1. Key generation: choose large primes p, q → n = p*q
+        2. Public key (n, e) is used to encrypt:
+           c = m^e mod n, with padding (OAEP)
+        3. Private key (n, d) is used to decrypt:
+           m = c^d mod n, remove padding
 
-        Mode: CBC (Cipher Block Chaining) for security
+        NOTE: RSA is used for small messages (e.g., symmetric keys),
+        not bulk file encryption.
         """
-        # Create cipher object in CBC mode
-        cipher = DES.new(self.des_key, DES.MODE_CBC)
+        cipher = PKCS1_OAEP.new(self.public_key)
+        ciphertext = cipher.encrypt(plaintext)
+        return ciphertext
 
-        # Pad plaintext to be multiple of 8 bytes (DES block size)
-        padded_text = pad(plaintext, DES.block_size)
-
-        # Encrypt the padded plaintext
-        ciphertext = cipher.encrypt(padded_text)
-
-        # Return IV + ciphertext (IV needed for decryption)
-        return cipher.iv + ciphertext
-
-    def des_decrypt(self, ciphertext):
-        """
-        DES Decryption:
-        Reverses the encryption process using the same key
-        """
-        # Extract the IV (first 8 bytes)
-        iv = ciphertext[:8]
-
-        # Extract the actual ciphertext
-        actual_ciphertext = ciphertext[8:]
-
-        # Create cipher object with the same IV
-        cipher = DES.new(self.des_key, DES.MODE_CBC, iv)
-
-        # Decrypt
-        padded_plaintext = cipher.decrypt(actual_ciphertext)
-
-        # Remove padding
-        return unpad(padded_plaintext, DES.block_size)
+    def rsa_decrypt(self, ciphertext: bytes) -> bytes:
+        """RSA Decryption using the private key"""
+        cipher = PKCS1_OAEP.new(self.private_key)
+        plaintext = cipher.decrypt(ciphertext)
+        return plaintext
 
     def verify_encryption(self):
         """Test that encryption and decryption work correctly"""
-        test_message = b"Hello, this is a test message for DES encryption!"
+        test_message = b"Hello, this is a test message for RSA encryption!"
 
         print("VERIFICATION TEST:")
         print(f"Original message: {test_message.decode()}")
 
         # Encrypt
-        encrypted = self.des_encrypt(test_message)
+        encrypted = self.rsa_encrypt(test_message)
         print(f"Encrypted (hex): {encrypted[:32].hex()}... ({len(encrypted)} bytes)")
 
         # Decrypt
-        decrypted = self.des_decrypt(encrypted)
+        decrypted = self.rsa_decrypt(encrypted)
         print(f"Decrypted message: {decrypted.decode()}")
 
         # Verify
@@ -104,39 +81,39 @@ class DESAnalysis:
         else:
             print("✗ Error: Decryption failed!\n")
 
-    def benchmark_des(self, plaintext, iterations=100):
+    def benchmark_rsa(self, plaintext: bytes, iterations: int = 100):
         """
-        Benchmark DES encryption and decryption performance
+        Benchmark RSA encryption and decryption performance
 
         Returns:
             - Average encryption time (seconds)
             - Average decryption time (seconds)
-            - Throughput (MB/s)
+            - Throughput (MB/s) based on message size
         """
         # Benchmark encryption
         encrypt_times = []
         for _ in range(iterations):
             start = time.perf_counter()
-            ciphertext = self.des_encrypt(plaintext)
+            ciphertext = self.rsa_encrypt(plaintext)
             end = time.perf_counter()
             encrypt_times.append(end - start)
 
         avg_encrypt_time = np.mean(encrypt_times)
         std_encrypt_time = np.std(encrypt_times)
 
-        # Benchmark decryption
-        ciphertext = self.des_encrypt(plaintext)
+        # Benchmark decryption (use a fixed ciphertext)
+        ciphertext = self.rsa_encrypt(plaintext)
         decrypt_times = []
         for _ in range(iterations):
             start = time.perf_counter()
-            self.des_decrypt(ciphertext)
+            self.rsa_decrypt(ciphertext)
             end = time.perf_counter()
             decrypt_times.append(end - start)
 
         avg_decrypt_time = np.mean(decrypt_times)
         std_decrypt_time = np.std(decrypt_times)
 
-        # Calculate throughput in MB/s
+        # Calculate throughput in MB/s (for the small message size)
         data_size_mb = len(plaintext) / (1024 * 1024)
         encrypt_throughput = data_size_mb / avg_encrypt_time if avg_encrypt_time > 0 else 0
         decrypt_throughput = data_size_mb / avg_decrypt_time if avg_decrypt_time > 0 else 0
@@ -151,7 +128,7 @@ class DESAnalysis:
         }
 
     def run_benchmarks(self):
-        """Run comprehensive benchmarks across different data sizes"""
+        """Run comprehensive benchmarks across different message sizes"""
         results = {
             'sizes': [],
             'encrypt_times': [],
@@ -166,17 +143,17 @@ class DESAnalysis:
         print("-" * 60)
 
         for size in self.test_sizes:
-            # Generate random test data
+            # Generate random test message of given size
             plaintext = get_random_bytes(size)
 
-            print(f"\nData Size: {size:,} bytes ({size / 1024:.2f} KB)")
+            print(f"\nMessage Size: {size:,} bytes")
 
             # Run benchmark
-            bench_result = self.benchmark_des(plaintext)
+            bench_result = self.benchmark_rsa(plaintext)
 
             # Store results
             results['sizes'].append(size)
-            results['encrypt_times'].append(bench_result['encrypt_time'] * 1000)  # Convert to ms
+            results['encrypt_times'].append(bench_result['encrypt_time'] * 1000)  # ms
             results['decrypt_times'].append(bench_result['decrypt_time'] * 1000)
             results['encrypt_throughput'].append(bench_result['encrypt_throughput'])
             results['decrypt_throughput'].append(bench_result['decrypt_throughput'])
@@ -188,8 +165,8 @@ class DESAnalysis:
                   f"(±{bench_result['encrypt_std'] * 1000:.4f} ms)")
             print(f"  Decryption: {bench_result['decrypt_time'] * 1000:.4f} ms "
                   f"(±{bench_result['decrypt_std'] * 1000:.4f} ms)")
-            print(f"  Throughput: {bench_result['encrypt_throughput']:.2f} MB/s (encrypt), "
-                  f"{bench_result['decrypt_throughput']:.2f} MB/s (decrypt)")
+            print(f"  Throughput: {bench_result['encrypt_throughput']:.6f} MB/s (encrypt), "
+                  f"{bench_result['decrypt_throughput']:.6f} MB/s (decrypt)")
 
         print("\n" + "=" * 60)
         return results
@@ -197,20 +174,20 @@ class DESAnalysis:
     def visualize_results(self, results):
         """Create visualizations of benchmark results"""
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-        fig.suptitle('DES Encryption Algorithm Performance Analysis',
+        fig.suptitle('RSA Encryption Algorithm Performance Analysis',
                      fontsize=16, fontweight='bold')
 
-        sizes_kb = [s / 1024 for s in results['sizes']]
+        sizes_bytes = results['sizes']
 
-        # Plot 1: Encryption vs Decryption Time
+        # Plot 1: Encryption vs Decryption Time (log scale)
         ax1 = axes[0, 0]
-        ax1.plot(sizes_kb, results['encrypt_times'], 'o-',
-                 label='Encryption', linewidth=2, markersize=8, color='#2E86AB')
-        ax1.plot(sizes_kb, results['decrypt_times'], 's-',
-                 label='Decryption', linewidth=2, markersize=8, color='#A23B72')
-        ax1.set_xlabel('Data Size (KB)', fontsize=11)
+        ax1.plot(sizes_bytes, results['encrypt_times'], 'o-',
+                 label='Encryption', linewidth=2, markersize=8)
+        ax1.plot(sizes_bytes, results['decrypt_times'], 's-',
+                 label='Decryption', linewidth=2, markersize=8)
+        ax1.set_xlabel('Message Size (bytes)', fontsize=11)
         ax1.set_ylabel('Time (milliseconds)', fontsize=11)
-        ax1.set_title('DES Encryption/Decryption Time vs Data Size', fontsize=12)
+        ax1.set_title('RSA Encryption/Decryption Time vs Message Size', fontsize=12)
         ax1.legend(fontsize=10)
         ax1.grid(True, alpha=0.3)
         ax1.set_xscale('log')
@@ -218,48 +195,50 @@ class DESAnalysis:
 
         # Plot 2: Throughput
         ax2 = axes[0, 1]
-        ax2.plot(sizes_kb, results['encrypt_throughput'], 'o-',
-                 label='Encryption', linewidth=2, markersize=8, color='#2E86AB')
-        ax2.plot(sizes_kb, results['decrypt_throughput'], 's-',
-                 label='Decryption', linewidth=2, markersize=8, color='#A23B72')
-        ax2.set_xlabel('Data Size (KB)', fontsize=11)
+        ax2.plot(sizes_bytes, results['encrypt_throughput'], 'o-',
+                 label='Encryption', linewidth=2, markersize=8)
+        ax2.plot(sizes_bytes, results['decrypt_throughput'], 's-',
+                 label='Decryption', linewidth=2, markersize=8)
+        ax2.set_xlabel('Message Size (bytes)', fontsize=11)
         ax2.set_ylabel('Throughput (MB/s)', fontsize=11)
-        ax2.set_title('DES Throughput Performance', fontsize=12)
+        ax2.set_title('RSA Throughput Performance (per operation)', fontsize=12)
         ax2.legend(fontsize=10)
         ax2.grid(True, alpha=0.3)
         ax2.set_xscale('log')
 
-        # Plot 3: Time scaling (linear view)
+        # Plot 3: Encryption time with std dev (linear)
         ax3 = axes[1, 0]
-        ax3.plot(sizes_kb, results['encrypt_times'], 'o-',
-                 linewidth=2, markersize=8, color='#2E86AB')
-        ax3.fill_between(sizes_kb,
+        ax3.plot(sizes_bytes, results['encrypt_times'], 'o-',
+                 linewidth=2, markersize=8)
+        ax3.fill_between(sizes_bytes,
                          np.array(results['encrypt_times']) - np.array(results['encrypt_std']),
                          np.array(results['encrypt_times']) + np.array(results['encrypt_std']),
-                         alpha=0.3, color='#2E86AB')
-        ax3.set_xlabel('Data Size (KB)', fontsize=11)
+                         alpha=0.3)
+        ax3.set_xlabel('Message Size (bytes)', fontsize=11)
         ax3.set_ylabel('Encryption Time (milliseconds)', fontsize=11)
-        ax3.set_title('DES Encryption Time with Standard Deviation', fontsize=12)
+        ax3.set_title('RSA Encryption Time with Standard Deviation', fontsize=12)
         ax3.grid(True, alpha=0.3)
 
         # Plot 4: Performance summary bar chart
         ax4 = axes[1, 1]
-        categories = ['Smallest\n(8 bytes)', 'Medium\n(4 KB)', 'Largest\n(64 KB)']
+        categories = [f'{sizes_bytes[0]} bytes',
+                      f'{sizes_bytes[len(sizes_bytes)//2]} bytes',
+                      f'{sizes_bytes[-1]} bytes']
         encrypt_vals = [results['encrypt_times'][0],
-                        results['encrypt_times'][4],
+                        results['encrypt_times'][len(sizes_bytes)//2],
                         results['encrypt_times'][-1]]
         decrypt_vals = [results['decrypt_times'][0],
-                        results['decrypt_times'][4],
+                        results['decrypt_times'][len(sizes_bytes)//2],
                         results['decrypt_times'][-1]]
 
         x = np.arange(len(categories))
         width = 0.35
 
-        bars1 = ax4.bar(x - width / 2, encrypt_vals, width, label='Encryption', color='#2E86AB')
-        bars2 = ax4.bar(x + width / 2, decrypt_vals, width, label='Decryption', color='#A23B72')
+        bars1 = ax4.bar(x - width / 2, encrypt_vals, width, label='Encryption')
+        bars2 = ax4.bar(x + width / 2, decrypt_vals, width, label='Decryption')
 
         ax4.set_ylabel('Time (milliseconds)', fontsize=11)
-        ax4.set_title('DES Performance Comparison by Data Size', fontsize=12)
+        ax4.set_title('RSA Performance Comparison by Message Size', fontsize=12)
         ax4.set_xticks(x)
         ax4.set_xticklabels(categories)
         ax4.legend(fontsize=10)
@@ -274,76 +253,56 @@ class DESAnalysis:
                          ha='center', va='bottom', fontsize=9)
 
         plt.tight_layout()
-        plt.savefig('des_benchmark_results.png', dpi=300, bbox_inches='tight')
-        print("\n✓ Visualization saved as 'des_benchmark_results.png'")
+        plt.savefig('rsa_benchmark_results.png', dpi=300, bbox_inches='tight')
+        print("\n✓ Visualization saved as 'rsa_benchmark_results.png'")
         plt.show()
 
-    def print_des_info(self):
-        """Print detailed information about DES"""
+    def print_rsa_info(self):
+        """Print detailed information about RSA"""
         print("\n" + "=" * 60)
-        print("DES ALGORITHM INFORMATION")
+        print("RSA ALGORITHM INFORMATION")
         print("=" * 60)
 
         print("\nKEY CHARACTERISTICS:")
-        print("  • Block Size: 64 bits (8 bytes)")
-        print("  • Key Size: 64 bits (56 effective after parity bits)")
-        print("  • Number of Rounds: 16")
-        print("  • Type: Symmetric block cipher")
-        print("  • Developed: Early 1970s, published 1977")
+        print(f"  • Modulus size: {self.key.size_in_bits()} bits")
+        print("  • Asymmetric: public key (encrypt/verify), private key (decrypt/sign)")
+        print("  • Based on integer factorization problem")
+        print("  • Introduced: 1977 (Rivest, Shamir, Adleman)")
 
-        print("\nENCRYPTION PROCESS:")
-        print("  1. Initial Permutation (IP)")
-        print("  2. 16 Rounds of:")
-        print("     • Split plaintext block in half (L, R)")
-        print("     • Key scheduling:")
-        print("       - Split key in half")
-        print("       - Circular rotation (1-2 bits per round)")
-        print("       - Compression (56 → 48 bits)")
-        print("     • Expansion function (32 → 48 bits)")
-        print("     • XOR with round key")
-        print("     • S-box substitution (48 → 32 bits)")
-        print("     • Permutation")
-        print("     • Swap halves")
-        print("  3. Final Permutation (FP)")
+        print("\nTYPICAL USES:")
+        print("  • Secure key exchange (encrypt a symmetric session key)")
+        print("  • Digital signatures and authentication")
+        print("  • Small control messages, not bulk data encryption")
 
         print("\nSTRENGTHS:")
-        print("  • Well-studied and understood")
-        print("  • Simple and efficient in hardware")
-        print("  • Fast encryption/decryption")
-        print("  • Good diffusion and confusion properties")
+        print("  • Public-key system: no pre-shared secret needed")
+        print("  • Widely analyzed and well-understood")
+        print("  • Supports encryption and signatures")
 
-        print("\nWEAKNESSES:")
-        print("  • 56-bit key is too small (vulnerable to brute force)")
-        print("  • Broken in 1998 (56 hours with specialized hardware)")
-        print("  • Considered cryptographically insecure today")
-        print("  • Replaced by AES in 2001")
-
-        print("\nLEGACY:")
-        print("  • Triple DES (3DES) extends security by applying DES 3 times")
-        print("  • Influential to modern cryptography development")
-        print("  • Still used in some legacy systems")
-
+        print("\nLIMITATIONS:")
+        print("  • Much slower than symmetric ciphers (DES, AES)")
+        print("  • Message size limited by key size and padding")
+        print("  • Requires correct padding and key management")
         print("=" * 60)
 
 
 def main():
     """Main execution function"""
-    # Create DES analysis object
-    des = DESAnalysis()
+    rsa = RSAAnalysis()
 
     # Verify that encryption/decryption works
-    des.verify_encryption()
+    rsa.verify_encryption()
 
     # Run benchmarks
-    results = des.run_benchmarks()
+    results = rsa.run_benchmarks()
 
     # Visualize results
-    des.visualize_results(results)
+    rsa.visualize_results(results)
 
-    # Print DES information
-    # des.print_des_info()
+    # Optional: print more RSA info
+    # rsa.print_rsa_info()
 
-    print("\n✓ DES Analysis Complete!")
+    print("\n✓ RSA Analysis Complete!")
     print("=" * 60)
 
 
